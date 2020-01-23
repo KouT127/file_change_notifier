@@ -82,6 +82,16 @@ func main() {
 			continue
 		}
 
-		log.Print(watcher[int(ev.Ident)])
+		event := events[0]
+		path := watcher[int(ev.Ident)]
+		if event.Fflags&unix.NOTE_DELETE == unix.NOTE_DELETE {
+			log.Print( "delete: " + path)
+		}
+		if event.Fflags&unix.NOTE_WRITE == unix.NOTE_WRITE {
+			log.Print("write: " + path)
+		}
+		if event.Fflags&unix.NOTE_RENAME == unix.NOTE_RENAME {
+			log.Print("rename: " + path)
+		}
 	}
 }
