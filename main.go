@@ -77,7 +77,7 @@ func main() {
 		if err != nil {
 			log.Println("error")
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		if cnt == 0 {
 			continue
 		}
