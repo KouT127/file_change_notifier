@@ -48,6 +48,7 @@ var (
 	mu      sync.Mutex
 )
 
+// TODO: 一度しかEventを取得できない。
 func main() {
 	path := "./test"
 	files, err := ioutil.ReadDir(path)
