@@ -2,9 +2,25 @@ package main
 
 import (
 	"golang.org/x/sys/unix"
+	"io/ioutil"
 	"log"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 )
+
+// ref: https://github.com/fsnotify/fsnotify/blob/master/kqueue.go
+// ref: https://www.freebsd.org/cgi/man.cgi?kqueue
+// EV_ADD: イベントをkqueueに追加する
+// EV_CLEAR: イベントを取得した後、再びセットする
+// EV_ENABLE: keventをトリガーすることを許可する
+const evFlags = unix.EV_ADD | unix.EV_CLEAR | unix.EV_ENABLE
+
+// NOTE_WRITE: 書き込み
+// NOTE_RENAME: リネーム
+// NOTE_DELETE: 削除
+const noteFlags = unix.NOTE_WRITE | unix.NOTE_ATTRIB | unix.NOTE_RENAME
 
 func kqueue() (int, error) {
 	// kqueue（カーネルイベントキュー）を作成
@@ -18,7 +34,7 @@ func kqueue() (int, error) {
 func open(path string) (*int, error) {
 	// FileまたはDirの識別子を取得
 	// path: パス
-	// O_RDONLY: リードオンリー
+	// O_RDONLY: リードオンリーで開く
 	// perm: パーミッション 700
 	fd, err := unix.Open(path, unix.O_RDONLY, 0700)
 	if fd == -1 {
@@ -27,33 +43,41 @@ func open(path string) (*int, error) {
 	return &fd, nil
 }
 
+var (
+	watcher map[int]string
+	mu      sync.Mutex
+)
+
 func main() {
 	path := "./test"
-	watcher := map[int]string{}
+	files, err := ioutil.ReadDir(path)
+	done := make(chan bool)
+
+	watcher = map[int]string{}
 
 	kq, err := kqueue()
 	if err != nil {
 		log.Fatal("error")
 		return
 	}
-	fd, err := open(path)
+	for _, file := range files {
+		go read(kq, path, file)
+	}
+	<-done
+}
+
+func read(kq int, path string, info os.FileInfo) {
+	fp := filepath.Join(path, info.Name())
+	fd, err := open(fp)
 	if err != nil {
 		log.Fatal("err")
 		return
 	}
-	watcher[*fd] = path
+	mu.Lock()
+	watcher[*fd] = fp
+	mu.Unlock()
 
 	// Keventを作成
-	// ref: https://www.freebsd.org/cgi/man.cgi?kqueue
-	// EV_ADD: イベントをkqueueに追加する
-	// EV_CLEAR: イベントを取得した後、再びセットする
-	// EV_ENABLE: keventをトリガーすることを許可する
-	const evFlags = unix.EV_ADD | unix.EV_CLEAR | unix.EV_ENABLE
-
-	// NOTE_WRITE: 書き込み
-	// NOTE_RENAME: リネーム
-	// NOTE_DELETE: 削除
-	const noteFlags = unix.NOTE_WRITE | unix.NOTE_RENAME | unix.NOTE_DELETE
 	ev := unix.Kevent_t{
 		// openで取得した、fileやdirの識別子を指定する
 		Ident: uint64(*fd),
@@ -83,9 +107,11 @@ func main() {
 		}
 
 		event := events[0]
+		mu.Lock()
 		path := watcher[int(ev.Ident)]
+		mu.Unlock()
 		if event.Fflags&unix.NOTE_DELETE == unix.NOTE_DELETE {
-			log.Print( "delete: " + path)
+			log.Print("delete: " + path)
 		}
 		if event.Fflags&unix.NOTE_WRITE == unix.NOTE_WRITE {
 			log.Print("write: " + path)
